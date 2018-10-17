@@ -1,0 +1,3 @@
+*.pyc
+onica_iotloader.egg-info/*
+*.db
