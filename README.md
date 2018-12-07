@@ -2,8 +2,16 @@ A tool to load bulk simulation data into AWS IoT Analytics for experimenting wit
 
 Installation:
 =======
+**Manual install**
 - Make sure you have a working Python environment
 - `pip install onica-iotloader` to get the latest version installed
+
+**Automated install**
+A cloudformation template `iotloader.yml` is provided to automate the deployment of an instance that is preconfigured to run onica-iotloader.  An existing ec2 keypair, and a source IP from which you will access the instance are required.  It will include a fresh copy of `template.py` from the repository in the home directory of ec2-user.  To access the instance:
+
+```
+ssh -i your.pem ec2-user@your_ec2_hostname.compute-1.amazonaws.com
+```
 
 Template
 =======

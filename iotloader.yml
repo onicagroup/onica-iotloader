@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys an ec2 instance with Onica IotLoader pre-configured for use
+
+Parameters:
+  LatestAmiId :
+    Type : AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Automatically pulls the correct AMI for this region, leave this value unchanged.
+
+  KeyPair:
+    Description: "The existing EC2 KeyPair to be used to access the IoTLoader \
+                  instance"
+    Type: AWS::EC2::KeyPair::KeyName
+
+  SourceIP:
+    Description: "The egress (public) IPv4 address from which you plan to \
+                  access your IotLoader instance.  Hint- https://whatismyip.com . \
+                  Specify address only, do not include /CIDR designator, \
+                  example 157.123.231.123"
+    Type: String
+
+
+Resources:
+  IoTLoaderInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.24xlarge
+      ImageId: !Ref LatestAmiId
+      KeyName:
+        Ref: KeyPair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref IoTLoaderSecurityGroup
+          SubnetId:
+            Ref: PublicSubnet
+      IamInstanceProfile: !Ref IoTLoaderInstanceProfile
+      Tags:
+        - Key: Name
+          Value: onica-iotloader
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "export AWS_DEFAULT_REGION=${AWS::Region}" >> /etc/environment
+          curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+          python get-pip.py
+          pip install onica-iotloader
+          cd /home/ec2-user/
+          wget https://raw.githubusercontent.com/onicagroup/onica-iotloader/master/template.py
+          
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: iotloader
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: iotloader
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select ['0', !GetAZs {Ref: 'AWS::Region'}]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: iotloader
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  IoTLoaderSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: iotloader
+      GroupDescription: iotloader
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Join ['/', [!Ref SourceIP, 32]]
+      Tags:
+        - Key: Name
+          Value: iotloader
+      VpcId: !Ref VPC
+
+  IoTLoaderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref IoTLoaderIamRole
+      InstanceProfileName: iotloader-InstanceProfile
+
+  IoTLoaderIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+      Policies:
+        -
+          PolicyName: IoTLoaderIamRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: iotanalytics:BatchPutMessage
+                Resource: '*'
